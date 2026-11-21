@@ -6,38 +6,68 @@ on:
 
 jobs:
   build:
-    runs-on: macos-13
+    # macOS runners on free accounts queue for a very long time; ubuntu is instant.
+    # We cross-compile a arm64 iOS Mach-O using Theos' extracted iPhoneOS SDK.
+    runs-on: ubuntu-latest
+    env:
+      SDK_VER: "16.5"
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Show toolchain
-        run: |
-          xcodebuild -version
-          xcrun -sdk iphoneos --show-sdk-version
-
-      - name: Compile ave2_poc
+      - name: Install toolchain
         run: |
           set -euo pipefail
-          APP=Payload/ave2_poc.app
-          mkdir -p "$APP"
-          xcrun -sdk iphoneos clang \
-            -arch arm64 \
-            -miphoneos-version-min=16.0 \
-            -Os \
-            -fobjc-arc \
-            -framework Foundation \
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang lld llvm curl unzip xz-utils zip make libssl-dev
+          clang --version | head -1
+          ld64.lld --version || true
+
+      - name: Fetch iPhoneOS SDK (sparse checkout of theos/sdks)
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git sdks-repo
+          cd sdks-repo
+          git sparse-checkout set "iPhoneOS${SDK_VER}.sdk"
+          cd ..
+          mkdir -p sdk
+          mv "sdks-repo/iPhoneOS${SDK_VER}.sdk" "sdk/iPhoneOS${SDK_VER}.sdk"
+          du -sh sdk
+          ls "sdk/iPhoneOS${SDK_VER}.sdk/System/Library/Frameworks" | head -20
+          test -f "sdk/iPhoneOS${SDK_VER}.sdk/System/Library/Frameworks/IOKit.framework/IOKit.tbd"
+          echo "IOKit.tbd present"
+
+      - name: Compile (arm64 iOS)
+        run: |
+          set -euo pipefail
+          SDK="$PWD/sdk/iPhoneOS${SDK_VER}.sdk"
+          mkdir -p Payload/ave2_poc.app
+          clang -target arm64-apple-ios16.0 \
+            -isysroot "$SDK" \
+            -F"$SDK/System/Library/Frameworks" \
+            -Os -fno-stack-protector \
+            -c ave2_poc.c -o ave2_poc.o
+          file ave2_poc.o
+
+      - name: Link
+        run: |
+          set -euo pipefail
+          SDK="$PWD/sdk/iPhoneOS${SDK_VER}.sdk"
+          ld64.lld -arch arm64 \
+            -platform_version ios 16.0 16.0 \
+            -syslibroot "$SDK" \
+            -o Payload/ave2_poc.app/ave2_poc \
+            ave2_poc.o \
             -framework IOKit \
-            -framework UIKit \
-            -o "$APP/ave2_poc" \
-            poc/ave2_poc.m
-          cp poc/Info.plist "$APP/Info.plist"
-          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist"
-          file "$APP/ave2_poc"
-          otool -L "$APP/ave2_poc"
+            -framework CoreFoundation \
+            -lSystem
+          file Payload/ave2_poc.app/ave2_poc
+          llvm-objdump --macho --private-headers Payload/ave2_poc.app/ave2_poc | head -30 || true
 
       - name: Package unsigned IPA
         run: |
           set -euo pipefail
+          cp Info.plist Payload/ave2_poc.app/Info.plist
           cd Payload
           zip -qry ../ave2_poc.ipa ave2_poc.app
           cd ..
