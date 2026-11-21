@@ -37,7 +37,7 @@ jobs:
           test -f "sdk/iPhoneOS${SDK_VER}.sdk/System/Library/Frameworks/IOKit.framework/IOKit.tbd"
           echo "IOKit.tbd present"
 
-      - name: Compile (arm64 iOS)
+      - name: Compile (arm64 iOS, ObjC + UIKit so the app is a real UIApplication)
         run: |
           set -euo pipefail
           SDK="$PWD/sdk/iPhoneOS${SDK_VER}.sdk"
@@ -45,8 +45,8 @@ jobs:
           clang -target arm64-apple-ios16.0 \
             -isysroot "$SDK" \
             -F"$SDK/System/Library/Frameworks" \
-            -Os -fno-stack-protector \
-            -c ave2_poc.c -o ave2_poc.o
+            -Os -fobjc-arc -fno-stack-protector \
+            -c ave2_poc_ui.m -o ave2_poc.o
           file ave2_poc.o
 
       - name: Link
@@ -58,11 +58,13 @@ jobs:
             -syslibroot "$SDK" \
             -o Payload/ave2_poc.app/ave2_poc \
             ave2_poc.o \
+            -framework UIKit \
+            -framework Foundation \
             -framework IOKit \
-            -framework CoreFoundation \
+            -lobjc \
             -lSystem
           file Payload/ave2_poc.app/ave2_poc
-          llvm-objdump --macho --private-headers Payload/ave2_poc.app/ave2_poc | head -30 || true
+          llvm-objdump --macho --private-headers Payload/ave2_poc.app/ave2_poc | head -20 || true
 
       - name: Package unsigned IPA (Payload/ must be the archive root)
         run: |
