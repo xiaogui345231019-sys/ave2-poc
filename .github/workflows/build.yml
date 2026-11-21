@@ -64,13 +64,16 @@ jobs:
           file Payload/ave2_poc.app/ave2_poc
           llvm-objdump --macho --private-headers Payload/ave2_poc.app/ave2_poc | head -30 || true
 
-      - name: Package unsigned IPA
+      - name: Package unsigned IPA (Payload/ must be the archive root)
         run: |
           set -euo pipefail
           cp Info.plist Payload/ave2_poc.app/Info.plist
-          cd Payload
-          zip -qry ../ave2_poc.ipa ave2_poc.app
-          cd ..
+          rm -f ave2_poc.ipa
+          # iOS expects: ave2_poc.ipa -> Payload/ave2_poc.app/...
+          zip -qry ave2_poc.ipa Payload
+          echo "--- archive layout check ---"
+          unzip -l ave2_poc.ipa
+          unzip -l ave2_poc.ipa | grep -q "Payload/ave2_poc.app/ave2_poc" || { echo "MISSING Payload prefix"; exit 1; }
           ls -la ave2_poc.ipa
 
       - name: Upload IPA
