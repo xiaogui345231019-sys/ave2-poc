@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "jpegscan2"
-      SRC: "jpegscan2.m"
-      PLIST: "Info_jpeg2.plist"
+      APP_NAME: "isurfprobe"
+      SRC: "isurf_probe.m"
+      PLIST: "Info_isurf.plist"
 
     steps:
       - uses: actions/checkout@v4
