@@ -25,10 +25,21 @@
 
 #import <UIKit/UIKit.h>
 #import <IOKit/IOKitLib.h>
-#import <IOSurface/IOSurface.h>
 #import <CoreFoundation/CoreFoundation.h>
 #include <mach/mach.h>
 #include <unistd.h>
+
+// theos SDK 的 IOSurface.framework 只有 .tbd，没有 Headers/ → 手动声明公开 API
+typedef struct __IOSurface *IOSurfaceRef;
+typedef uint32_t IOSurfaceID;
+
+extern IOSurfaceRef IOSurfaceLookup(IOSurfaceID csid);
+extern IOSurfaceID  IOSurfaceGetID(IOSurfaceRef buffer);
+extern void        *IOSurfaceGetBaseAddress(IOSurfaceRef buffer);
+extern size_t       IOSurfaceGetAllocSize(IOSurfaceRef buffer);
+extern size_t       IOSurfaceGetWidth(IOSurfaceRef buffer);
+extern size_t       IOSurfaceGetHeight(IOSurfaceRef buffer);
+extern size_t       IOSurfaceGetBytesPerRow(IOSurfaceRef buffer);
 
 static NSMutableString *gLog = nil;
 static UITextView    *gView = nil;
