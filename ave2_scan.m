@@ -86,7 +86,8 @@ static void L(NSString *fmt, ...)
     NSLog(@"AVE2SCAN %@", s);
 
     NSString *line = [s stringByAppendingString:@"\n"];
-    FILE *f = fopen([NSTemporaryDirectory() stringByAppendingPathComponent:@"ave2scan.log" UTF8String], "a");
+    NSString *logPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"ave2scan.log"];
+    FILE *f = fopen([logPath UTF8String], "a");
     if (f) { fprintf(f, "%s", [line UTF8String]); fclose(f); }
 
     dispatch_async(gQ, ^{
