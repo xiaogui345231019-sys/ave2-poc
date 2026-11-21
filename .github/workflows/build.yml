@@ -7,10 +7,13 @@ on:
 jobs:
   build:
     # macOS runners on free accounts queue for a very long time; ubuntu is instant.
-    # We cross-compile a arm64 iOS Mach-O using Theos' extracted iPhoneOS SDK.
+    # Cross-compile an arm64 iOS Mach-O using Theos' extracted iPhoneOS SDK.
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
+      APP_NAME: "ave2_scan"
+      SRC: "ave2_scan.m"
+      PLIST: "Info_scan.plist"
 
     steps:
       - uses: actions/checkout@v4
@@ -21,7 +24,6 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq clang lld llvm curl unzip xz-utils zip make libssl-dev
           clang --version | head -1
-          ld64.lld --version || true
 
       - name: Fetch iPhoneOS SDK (sparse checkout of theos/sdks)
         run: |
@@ -33,21 +35,21 @@ jobs:
           mkdir -p sdk
           mv "sdks-repo/iPhoneOS${SDK_VER}.sdk" "sdk/iPhoneOS${SDK_VER}.sdk"
           du -sh sdk
-          ls "sdk/iPhoneOS${SDK_VER}.sdk/System/Library/Frameworks" | head -20
           test -f "sdk/iPhoneOS${SDK_VER}.sdk/System/Library/Frameworks/IOKit.framework/IOKit.tbd"
-          echo "IOKit.tbd present"
+          test -f "sdk/iPhoneOS${SDK_VER}.sdk/System/Library/Frameworks/UIKit.framework/UIKit.tbd"
+          echo "SDK ok"
 
-      - name: Compile (arm64 iOS, ObjC + UIKit so the app is a real UIApplication)
+      - name: Compile (arm64 iOS, ObjC + UIKit + IOKit)
         run: |
           set -euo pipefail
           SDK="$PWD/sdk/iPhoneOS${SDK_VER}.sdk"
-          mkdir -p Payload/ave2_poc.app
+          mkdir -p "Payload/${APP_NAME}.app"
           clang -target arm64-apple-ios16.0 \
             -isysroot "$SDK" \
             -F"$SDK/System/Library/Frameworks" \
             -Os -fobjc-arc -fno-stack-protector \
-            -c ave2_poc_ui.m -o ave2_poc.o
-          file ave2_poc.o
+            -c "$SRC" -o app.o
+          file app.o
 
       - name: Link
         run: |
@@ -56,31 +58,28 @@ jobs:
           ld64.lld -arch arm64 \
             -platform_version ios 16.0 16.0 \
             -syslibroot "$SDK" \
-            -o Payload/ave2_poc.app/ave2_poc \
-            ave2_poc.o \
+            -o "Payload/${APP_NAME}.app/${APP_NAME}" \
+            app.o \
             -framework UIKit \
             -framework Foundation \
             -framework IOKit \
             -lobjc \
             -lSystem
-          file Payload/ave2_poc.app/ave2_poc
-          llvm-objdump --macho --private-headers Payload/ave2_poc.app/ave2_poc | head -20 || true
+          file "Payload/${APP_NAME}.app/${APP_NAME}"
 
       - name: Package unsigned IPA (Payload/ must be the archive root)
         run: |
           set -euo pipefail
-          cp Info.plist Payload/ave2_poc.app/Info.plist
-          rm -f ave2_poc.ipa
-          # iOS expects: ave2_poc.ipa -> Payload/ave2_poc.app/...
-          zip -qry ave2_poc.ipa Payload
-          echo "--- archive layout check ---"
-          unzip -l ave2_poc.ipa
-          unzip -l ave2_poc.ipa | grep -q "Payload/ave2_poc.app/ave2_poc" || { echo "MISSING Payload prefix"; exit 1; }
-          ls -la ave2_poc.ipa
+          cp "$PLIST" "Payload/${APP_NAME}.app/Info.plist"
+          rm -f "${APP_NAME}.ipa"
+          zip -qry "${APP_NAME}.ipa" Payload
+          echo "--- archive layout ---"
+          unzip -l "${APP_NAME}.ipa"
+          unzip -l "${APP_NAME}.ipa" | grep -q "Payload/${APP_NAME}.app/${APP_NAME}" || { echo "MISSING Payload prefix"; exit 1; }
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: ave2_poc-ipa
-          path: ave2_poc.ipa
+          name: ave2_scan-ipa
+          path: ave2_scan.ipa
           retention-days: 30
