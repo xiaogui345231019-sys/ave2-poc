@@ -2,8 +2,6 @@ name: build-ave2-poc
 
 on:
   push:
-    paths:
-      - 'poc/**'
   workflow_dispatch:
 
 jobs:
