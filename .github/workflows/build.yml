@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "ave2_scan"
-      SRC: "ave2_scan.m"
-      PLIST: "Info_scan.plist"
+      APP_NAME: "jpegscan"
+      SRC: "ave2_jpeg_scan.m"
+      PLIST: "Info_jpeg.plist"
 
     steps:
       - uses: actions/checkout@v4
