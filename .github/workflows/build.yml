@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "isurfprobe"
-      SRC: "isurf_probe.m"
-      PLIST: "Info_isurf.plist"
+      APP_NAME: "isurfprobe2"
+      SRC: "isurf_probe2.m"
+      PLIST: "Info_isurf2.plist"
 
     steps:
       - uses: actions/checkout@v4
@@ -37,6 +37,7 @@ jobs:
           du -sh sdk
           test -f "sdk/iPhoneOS${SDK_VER}.sdk/System/Library/Frameworks/IOKit.framework/IOKit.tbd"
           test -f "sdk/iPhoneOS${SDK_VER}.sdk/System/Library/Frameworks/UIKit.framework/UIKit.tbd"
+          test -f "sdk/iPhoneOS${SDK_VER}.sdk/System/Library/Frameworks/IOSurface.framework/IOSurface.tbd"
           echo "SDK ok"
 
       - name: Compile (arm64 iOS, ObjC + UIKit + IOKit)
@@ -63,6 +64,7 @@ jobs:
             -framework UIKit \
             -framework Foundation \
             -framework IOKit \
+            -framework IOSurface \
             -lobjc \
             -lSystem
           file "Payload/${APP_NAME}.app/${APP_NAME}"
