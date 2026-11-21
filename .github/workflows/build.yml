@@ -1,0 +1,53 @@
+name: build-ave2-poc
+
+on:
+  push:
+    paths:
+      - 'poc/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcrun -sdk iphoneos --show-sdk-version
+
+      - name: Compile ave2_poc
+        run: |
+          set -euo pipefail
+          APP=Payload/ave2_poc.app
+          mkdir -p "$APP"
+          xcrun -sdk iphoneos clang \
+            -arch arm64 \
+            -miphoneos-version-min=16.0 \
+            -Os \
+            -fobjc-arc \
+            -framework Foundation \
+            -framework IOKit \
+            -framework UIKit \
+            -o "$APP/ave2_poc" \
+            poc/ave2_poc.m
+          cp poc/Info.plist "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist"
+          file "$APP/ave2_poc"
+          otool -L "$APP/ave2_poc"
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          cd Payload
+          zip -qry ../ave2_poc.ipa ave2_poc.app
+          cd ..
+          ls -la ave2_poc.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ave2_poc-ipa
+          path: ave2_poc.ipa
+          retention-days: 30
