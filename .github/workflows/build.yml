@@ -1,4 +1,4 @@
-name: build-ave2-poc
+﻿name: build-ave2-poc
 
 on:
   push:
@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "jpegprobe3"
-      SRC: "jpeg_probe3.m"
-      PLIST: "Info_jpeg3.plist"
+      APP_NAME: "jpegpoc4"
+      SRC: "jpeg_poc4.m"
+      PLIST: "Info_jpeg4.plist"
 
     steps:
       - uses: actions/checkout@v4
