@@ -59,12 +59,11 @@ static void SetStatus(NSString *s)
 }
 
 // ---- 类型 ----
+// CVPixelBufferRef / kCVPixelFormatType_32BGRA 由 SDK 的 CoreVideo 头提供（经 UIKit 间接包含）
 typedef void *VTCompressionSessionRef;
-typedef void *CVPixelBufferRef;
 typedef struct { int64_t value; int32_t timescale; uint32_t flags; int64_t epoch; } CMTime;
 
 static const uint32_t kCMVideoCodecType_HEVC = 0x68766331;      // 'hvc1'
-static const uint32_t kCVPixelFormatType_32BGRA = 0x42475241;   // 'BGRA'
 
 // ---- 函数指针 ----
 typedef int32_t (*fn_vt_create_t)(void *, int32_t, int32_t, uint32_t,
