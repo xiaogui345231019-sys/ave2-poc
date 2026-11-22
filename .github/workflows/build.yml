@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "typecast2"
-      SRC: "typecast2.m"
-      PLIST: "Info_typecast2.plist"
+      APP_NAME: "gpuscan"
+      SRC: "gpuscan.m"
+      PLIST: "Info_gpuscan.plist"
 
     steps:
       - uses: actions/checkout@v4
