@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "avdscan"
-      SRC: "avdscan.m"
-      PLIST: "Info_avdscan.plist"
+      APP_NAME: "iorenum"
+      SRC: "iorenum.m"
+      PLIST: "Info_iorenum.plist"
 
     steps:
       - uses: actions/checkout@v4
