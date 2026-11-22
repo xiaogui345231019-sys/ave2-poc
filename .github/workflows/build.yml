@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "vt112705d"
-      SRC: "vt112705d.m"
-      PLIST: "Info_vt112705d.plist"
+      APP_NAME: "xpcprobe"
+      SRC: "xpcprobe.m"
+      PLIST: "Info_xpcprobe.plist"
 
     steps:
       - uses: actions/checkout@v4
