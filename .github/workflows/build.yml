@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "ksscan"
-      SRC: "ksscan.m"
-      PLIST: "Info_ksscan.plist"
+      APP_NAME: "vt112705"
+      SRC: "vt112705.m"
+      PLIST: "Info_vt112705.plist"
 
     steps:
       - uses: actions/checkout@v4
