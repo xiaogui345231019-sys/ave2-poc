@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "vtdecode"
-      SRC: "vtdecode.m"
-      PLIST: "Info_vtdecode.plist"
+      APP_NAME: "avdscan"
+      SRC: "avdscan.m"
+      PLIST: "Info_avdscan.plist"
 
     steps:
       - uses: actions/checkout@v4
