@@ -15,14 +15,13 @@
 //    0x877dc48  ldr x8, [x8, #0xc60]     ← 从全局取，不是 per-client
 //  ⇒ Metal 预热的是同一个实例，状态能传递给我门的 AGX client
 //
-//  本包做三阶段：
-//    Phase 1  Metal 预热：MTLDevice → CommandQueue → Texture → blit fill → commit → ★waitUntilCompleted
+//  三阶段：
+//    Phase 1  Metal 预热：MTLDevice → CommandQueue → Texture → render pass CLEAR
+//             → commit → ★waitUntilCompleted（不需要 shader / metallib）
 //    Phase 2  IOServiceOpen(AGXAcceleratorG13P_B0, type=1)
-//    Phase 3  ★EARLY sel 9 resType=3 cap=0x80（进程内第一次，排除状态污染）
+//    Phase 3  ★EARLY sel 9 resType=3 cap=0x80（进程内第一次）
 //
 //  判据（唯一）：[EARLY] 0x03 cap=0x80 -> 0x00000000 SUCCESS
-//
-//  风险：极低。Metal 是公开 API，blit fill 1 张 16x16 texture。
 //
 
 #import <UIKit/UIKit.h>
@@ -52,6 +51,7 @@ static const char *kr_hint(uint32_t k)
     }
 }
 
+// 纯 C 风格日志：只接受 const char *
 static void L(const char *fmt, ...)
 {
     va_list ap; va_start(ap, fmt);
@@ -82,65 +82,64 @@ static void SetStatus(NSString *s)
 }
 
 // ---------------------------------------------------------------- Phase 1
-// 返回 YES 表示 GPU 真的跑完了一次工作
 static BOOL metal_warmup(void)
 {
-    L(@"=== Phase 1: Metal 预热 ===");
+    L("=== Phase 1: Metal warmup ===");
 
     id<MTLDevice> dev = MTLCreateSystemDefaultDevice();
-    L(@"  MTLCreateSystemDefaultDevice -> %s", dev ? "OK" : "nil");
-    if (!dev) { L(@"  ★ Metal 不可用，Phase 1 失败"); return NO; }
-    L(@"  device.name = %s", [[dev name] UTF8String] ?: "(null)");
+    L("  MTLCreateSystemDefaultDevice -> %s", dev ? "OK" : "nil");
+    if (!dev) { L("  !! Metal unavailable, Phase 1 fail"); return NO; }
+    L("  device.name = %s", [[dev name] UTF8String] ?: "(null)");
 
     id<MTLCommandQueue> q = [dev newCommandQueue];
-    L(@"  newCommandQueue -> %s", q ? "OK" : "nil");
+    L("  newCommandQueue -> %s", q ? "OK" : "nil");
     if (!q) return NO;
 
-    // 16x16 RGBA8 texture，不需要 shader
+    // 16x16 RGBA8，作为 render target（不需要 shader）
     MTLTextureDescriptor *td =
         [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
                                                            width:16
                                                           height:16
                                                        mipmapped:NO];
-    td.usage = MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite;
+    td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
     td.storageMode = MTLStorageModePrivate;
 
     id<MTLTexture> tex = [dev newTextureWithDescriptor:td];
-    L(@"  newTextureWithDescriptor(16x16 RGBA8, private) -> %s", tex ? "OK" : "nil");
+    L("  newTextureWithDescriptor(16x16 RGBA8, renderTarget) -> %s", tex ? "OK" : "nil");
     if (!tex) return NO;
 
     id<MTLCommandBuffer> cb = [q commandBuffer];
-    id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
-    L(@"  blitCommandEncoder -> %s", blit ? "OK" : "nil");
-    if (!blit) return NO;
 
-    // fillTexture 不需要 shader / metallib
-    [blit fillTexture:tex
-            withColor:MTLClearColorMake(1.0, 0.0, 1.0, 1.0)
-                 level:0
-                  slice:0];
-    [blit endEncoding];
+    // ★ render pass 只做 CLEAR，不需要 pipeline / shader / metallib
+    MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+    rp.colorAttachments[0].texture     = tex;
+    rp.colorAttachments[0].loadAction  = MTLLoadActionClear;
+    rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+    rp.colorAttachments[0].clearColor  = MTLClearColorMake(1.0, 0.0, 1.0, 1.0);
+
+    id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
+    L("  renderCommandEncoder(CLEAR) -> %s", enc ? "OK" : "nil");
+    if (!enc) return NO;
+    [enc endEncoding];
 
     [cb commit];
-    L(@"  commit 完成，等 GPU ...");
+    L("  commit done, waiting GPU ...");
 
-    // ★★★ 这一行是关键：必须等 GPU 真正跑完，accelerator 才会进入就绪态
+    // ★★★ 必须等 GPU 真正跑完，accelerator 才会进入就绪态
     [cb waitUntilCompleted];
 
     if (cb.status == MTLCommandBufferStatusCompleted) {
-        L(@"  ★ waitUntilCompleted -> Completed ✓ GPU 已执行");
+        L("  ** waitUntilCompleted -> Completed  (GPU executed)");
         return YES;
     }
-    L(@"  ★ waitUntilCompleted -> status=%ld（GPU 未正常完成）", (long)cb.status);
-    if (cb.error) L(@"    error = %s", [[cb.error description] UTF8String]);
+    L("  ** waitUntilCompleted -> status=%ld", (long)cb.status);
+    if (cb.error) L("     error = %s", [[cb.error description] UTF8String]);
     return NO;
 }
 
 // ---------------------------------------------------------------- Phase 3
-// EARLY: 进程内第一次 resType=3 调用
 static void try_new_resource_group(io_connect_t conn, uint32_t resType, uint32_t cap, const char *tag)
 {
-    // 输入结构：resType 在最前，capacity 在 +0x38（依据 p18 扫描时的排布）
     uint8_t in[0x100];
     memset(in, 0, sizeof(in));
     *(uint32_t *)(in + 0x00) = resType;
@@ -151,54 +150,50 @@ static void try_new_resource_group(io_connect_t conn, uint32_t resType, uint32_t
     size_t os = sizeof(out);
 
     kern_return_t kr = IOConnectCallStructMethod(conn, 9, in, sizeof(in), out, &os);
-    L(@"  [%-6s] resType=0x%02x cap=0x%-4x -> 0x%08x  %s",
+    L("  [%-6s] resType=0x%02x cap=0x%-4x -> 0x%08x  %s",
       tag, resType, cap, (uint32_t)kr, kr_hint((uint32_t)kr));
     usleep(150 * 1000);
 }
 
 static void run(void)
 {
-    L(@"===== p19: Metal 预热 + resType=3 =====");
-    L(@"uid=%d pid=%d", getuid(), getpid());
-    L(@"链路: sel9 → +0x5b0 → +0x650(alloc) → AGXResource::+0x80 → accelerator->vtable[0x90]");
-    L(@"");
+    L("===== p19: Metal warmup + resType=3 =====");
+    L("uid=%d pid=%d", getuid(), getpid());
+    L("chain: sel9 -> +0x5b0 -> +0x650(alloc) -> AGXResource::+0x80 -> accelerator->vtable[0x90]");
+    L("");
 
-    // ---- Phase 1 ----
     BOOL warmed = metal_warmup();
 
-    L(@"");
-    L(@"=== Phase 2: 打开 AGX client ===");
+    L("");
+    L("=== Phase 2: open AGX client ===");
     CFMutableDictionaryRef m = IOServiceMatching("AGXAcceleratorG13P_B0");
     io_service_t svc = m ? IOServiceGetMatchingService(kIOMainPortDefault, m) : MACH_PORT_NULL;
-    L(@"  service = 0x%x", svc);
-    if (svc == MACH_PORT_NULL) { SetStatus(@"无服务"); return; }
+    L("  service = 0x%x", svc);
+    if (svc == MACH_PORT_NULL) { SetStatus(@"no service"); return; }
 
     io_connect_t conn = MACH_PORT_NULL;
     kern_return_t kr = IOServiceOpen(svc, mach_task_self(), 1, &conn);
-    L(@"  open(type=1) -> 0x%08x %s conn=0x%x", (uint32_t)kr, kr_hint((uint32_t)kr), conn);
+    L("  open(type=1) -> 0x%08x %s conn=0x%x", (uint32_t)kr, kr_hint((uint32_t)kr), conn);
     IOObjectRelease(svc);
-    if (kr != KERN_SUCCESS) { SetStatus(@"打不开"); return; }
+    if (kr != KERN_SUCCESS) { SetStatus(@"open fail"); return; }
 
-    // ---- Phase 3：EARLY，必须第一件事 ----
-    L(@"");
-    L(@"=== Phase 3: ★EARLY sel 9 resType=3（进程内第一次）===");
-    if (warmed) L(@"  （Metal 已预热，accelerator 应为就绪态）");
-    else        L(@"  （★ Metal 预热失败，本次结果只能作为基线）");
+    L("");
+    L("=== Phase 3: **EARLY sel 9 resType=3 (first call in process)** ===");
+    if (warmed) L("  (Metal warmed, accelerator should be ready)");
+    else        L("  (!! Metal warmup failed, result is baseline only)");
 
     try_new_resource_group(conn, 0x03, 0x80,  "EARLY");
-    // 对照组：其他三档（p18 已证全 Error，这里确认预热是否改变其中任意一档）
     try_new_resource_group(conn, 0x03, 0x40,  "A");
     try_new_resource_group(conn, 0x03, 0x100, "B");
     try_new_resource_group(conn, 0x03, 0x200, "C");
 
-    L(@"");
-    L(@"=== 判读 ===");
-    L(@"  [EARLY] 0x03 cap=0x80 -> 0x00000000 SUCCESS  => ★★★ A 侧复活，立刻做 type=3 命令");
-    L(@"  [EARLY] 仍是 0xe00002bc Error              => Metal 预热不足以驱动 accelerator->vtable[0x90]");
-    L(@"                                               => 下一步：解 [0x7ad9c60]+0x90 的目标函数，看它检查什么");
-    L(@"  [EARLY] 变成其他码                          => 状态变了，记录并扩展");
+    L("");
+    L("=== VERDICT ===");
+    L("  [EARLY] 0x03 cap=0x80 -> 0x00000000 SUCCESS  => *** A-side revived, build type=3 command next");
+    L("  [EARLY] still 0xe00002bc Error              => warmup insufficient; next: disasm [0x7ad9c60]+0x90");
+    L("  [EARLY] other code                          => state changed, extend scan");
 
-    SetStatus(warmed ? @"完成（已预热）" : @"完成（预热失败）");
+    SetStatus(warmed ? @"done (warmed)" : @"done (warmup failed)");
     IOServiceClose(conn);
 }
 
