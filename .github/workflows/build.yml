@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "agxres"
-      SRC: "agxres.m"
-      PLIST: "Info_agxres.plist"
+      APP_NAME: "agxsub"
+      SRC: "agxsub.m"
+      PLIST: "Info_agxsub.plist"
 
     steps:
       - uses: actions/checkout@v4
