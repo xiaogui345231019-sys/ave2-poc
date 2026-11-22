@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "xpcprobe"
-      SRC: "xpcprobe.m"
-      PLIST: "Info_xpcprobe.plist"
+      APP_NAME: "iogpu_probe"
+      SRC: "iogpu_probe.m"
+      PLIST: "Info_iogpu.plist"
 
     steps:
       - uses: actions/checkout@v4
