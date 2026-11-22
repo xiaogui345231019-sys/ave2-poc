@@ -168,10 +168,13 @@ static void do_probe_notif(void)
     //   0x9c0fa1c 的前置：w1 >= 1（0x9c0fa38 add w8,w1,#-0x2001 ; cmn w8,#0x2000 ; b.lo）
     //                    w2 > 0x52（0x9c0fa44 sub w8,w2,#0x29 ; cmn w8,#0x29 ; b.ls）
     //                    id 写 structureOutput+8（0x9c0fa78）
+    // sel15 = IOGPUDevice::create_notificationqueue(w1, w2, data*)
+    //   0x9c0fa38  add w8,w1,#-0x2001 ; cmn w8,#0x2000 ; b.lo FAIL  => w1 >= 1
+    //   0x9c0fa44  sub w8,w2,#0x29    ; cmn w8,#0x29   ; b.ls FAIL  => w2 < 0x29  (借位才进位)
     uint32_t cand[][2] = {
-        { 2, 0x53 }, { 0x100, 0x100 }, { 0x1000, 0x1000 }, { 4, 0x60 }
+        { 1, 1 }, { 2, 8 }, { 0x10, 0x20 }, { 0x20, 0x28 }, { 1, 0 }
     };
-    for (int si = 0; si < 4 && g_notif == 0; si++) {
+    for (int si = 0; si < 5 && g_notif == 0; si++) {
         uint64_t sc[2] = { cand[si][0], cand[si][1] };
         uint8_t out[16]; memset(out, 0, sizeof(out));
         size_t os = sizeof(out);
@@ -362,6 +365,41 @@ static void do_new_resource(void)
                             L(@"      ★ resource id 候选 = %u", cands[c]);
                             break;
                         }
+                    }
+                }
+            }
+        }
+    }
+    // ---- resType=0x03 = 资源组（IOGPUResourceGroup）----
+    // 0x9c10804 cmp w8,#3 -> ldr w2,[structIn+0x38] -> newResourceGroup
+    // structIn+0x38 = 初始容量：必须 >= 0x40、2 的幂、上限 0x80000
+    // 这条路不需要 IOSurface、不需要 entitlement
+    if (g_res == 0) {
+        L(@"   --- resType=0x03 (资源组)，capacity 扫 0x40/0x80/0x100 ---");
+        uint64_t caps[] = { 0x40, 0x80, 0x100 };
+        for (int i = 0; i < 3 && g_res == 0; i++) {
+            uint8_t in[0x58]; memset(in, 0, sizeof(in));
+            *(uint32_t *)(in + 0x00) = 0x03;               // resType = group
+            *(uint32_t *)(in + 0x38) = (uint32_t)caps[i];  // capacity
+            uint8_t out[0x400]; memset(out, 0, sizeof(out));
+            size_t os = sizeof(out);
+            kern_return_t r = IOConnectCallStructMethod(g_conn, 9, in, sizeof(in), out, &os);
+            L(@"   0x03 cap=0x%llx -> 0x%08x %-12s outSize=0x%zx out=%08x %08x %08x %08x",
+              (unsigned long long)caps[i], (uint32_t)r, kr_name(r), os,
+              *(uint32_t *)(out), *(uint32_t *)(out + 4),
+              *(uint32_t *)(out + 8), *(uint32_t *)(out + 12));
+            if (r == KERN_SUCCESS) {
+                NSMutableString *hx = [NSMutableString string];
+                for (int k = 0; k < 0x30; k += 4)
+                    [hx appendFormat:@"+%02x=%08x ", k, *(uint32_t *)(out + k)];
+                L(@"      out: %@", hx);
+                uint32_t cands[4] = { *(uint32_t *)(out + 8), *(uint32_t *)out,
+                                      *(uint32_t *)(out + 0x20), *(uint32_t *)(out + 4) };
+                for (int c = 0; c < 4; c++) {
+                    if (cands[c] && cands[c] < 0x100000) {
+                        g_res = cands[c];
+                        L(@"      ★ group handle 候选 = %u", cands[c]);
+                        break;
                     }
                 }
             }

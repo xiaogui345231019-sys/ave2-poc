@@ -47,7 +47,7 @@ kern_return_t pe_init(void) {
 
 kern_return_t pe_v1(void) {
     // 0x1000 pages
-    uint64_t n_of_total_search_mapping_pages = 0x1000 * 0x10;
+    uint64_t n_of_total_search_mapping_pages = 0x1000 * 0xC;
     // if (g_ctx.is_a18_devices) {
     //     n_of_total_search_mapping_pages = 0x10 * 0x10;
     // }

@@ -9,7 +9,7 @@
 	<key>CFBundleExecutable</key>
 	<string>clearsword_run</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.yg.clearsword</string>
+	<string>com.yg.ave2poc</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -38,5 +38,9 @@
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 </dict>
 </plist>

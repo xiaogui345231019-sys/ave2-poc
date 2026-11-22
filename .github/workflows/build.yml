@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "iogpu_probe"
-      SRC: "iogpu_probe.m"
-      PLIST: "Info_iogpu.plist"
+      APP_NAME: "ave2open2"
+      SRC: "ave2open2.m"
+      PLIST: "Info_ave2open2.plist"
 
     steps:
       - uses: actions/checkout@v4

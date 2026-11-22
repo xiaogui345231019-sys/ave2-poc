@@ -13,9 +13,19 @@
 static UITextView *g_logView = nil;
 static NSMutableString *g_log = nil;
 static int g_pipefd[2] = { -1, -1 };
+static FILE *g_logfp = NULL;
 
 static void append_line(NSString *s)
 {
+    // Write to a file in Documents as well, because the process gets killed by the
+    // CPU policy long before it finishes and the UI text dies with it.
+    // (Do NOT also NSLog here: NSLog writes to stderr, which we have dup2'd into the
+    //  pipe below -> infinite recursion. That bug once produced a 785 MB log.)
+    if (g_logfp) {
+        fputs([s UTF8String], g_logfp);
+        fflush(g_logfp);
+    }
+
     dispatch_async(dispatch_get_main_queue(), ^{
         [g_log appendString:s];
         // keep the buffer bounded
@@ -79,6 +89,11 @@ static void start_stderr_capture(void)
 
     self.window.rootViewController = vc;
     [self.window makeKeyAndVisible];
+
+    // persistent log file (survives the process being killed)
+    NSString *docs = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+    NSString *logPath = [docs stringByAppendingPathComponent:@"cs.log"];
+    g_logfp = fopen([logPath UTF8String], "w");
 
     start_stderr_capture();
 
