@@ -1,4 +1,4 @@
-name: build-ave2-poc
+﻿name: build-ave2-poc
 
 on:
   push:
@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "agxwarm"
-      SRC: "agxwarm.m"
-      PLIST: "Info_agxwarm.plist"
+      APP_NAME: "agxres"
+      SRC: "agxres.m"
+      PLIST: "Info_agxres.plist"
 
     steps:
       - uses: actions/checkout@v4
