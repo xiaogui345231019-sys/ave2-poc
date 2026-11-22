@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "vtsize"
-      SRC: "vtsize.m"
-      PLIST: "Info_vtsize.plist"
+      APP_NAME: "vtprepare"
+      SRC: "vtprepare.m"
+      PLIST: "Info_vtprepare.plist"
 
     steps:
       - uses: actions/checkout@v4
