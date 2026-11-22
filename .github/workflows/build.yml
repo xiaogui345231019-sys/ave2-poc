@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "gpuscan"
-      SRC: "gpuscan.m"
-      PLIST: "Info_gpuscan.plist"
+      APP_NAME: "ksscan"
+      SRC: "ksscan.m"
+      PLIST: "Info_ksscan.plist"
 
     steps:
       - uses: actions/checkout@v4
