@@ -62,7 +62,7 @@ static void SetStatus(NSString *s)
 }
 
 typedef void *VTCompressionSessionRef;
-typedef void *CVPixelBufferRef;
+// CVPixelBufferRef 由 SDK 的 CoreVideo 头提供（经 UIKit 间接包含），不要重新 typedef
 typedef struct { int64_t value; int32_t timescale; uint32_t flags; int64_t epoch; } CMTime;
 
 static const uint32_t CODEC_H264  = 0x61766331;   // 'avc1'
