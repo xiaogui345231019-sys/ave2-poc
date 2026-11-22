@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "jpegpoc7"
-      SRC: "jpeg_poc7.m"
-      PLIST: "Info_jpeg7.plist"
+      APP_NAME: "ave2gate"
+      SRC: "ave2_gate.m"
+      PLIST: "Info_ave2gate.plist"
 
     steps:
       - uses: actions/checkout@v4
