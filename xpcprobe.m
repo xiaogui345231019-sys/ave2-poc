@@ -1,16 +1,24 @@
 //
-//  xpcprobe.m — 测 8 个高价值 Mach service 的 app 可达性（v2）
+//  xpcprobe.m v3 — 修两个判定 bug
 //
-//  v1 的两个构建问题：
-//    1) theos SDK 没有 xpc/xpc.h        -> 手写函数声明
-//    2) XPC_TYPE_ERROR / XPC_TYPE_DICTIONARY / XPC_ERROR_KEY_DESCRIPTION 是数据符号，
-//       链接找不到（它们在 libsystem_xpc.dylib 里）-> 改用 dlsym 运行时查
+//  v2 的两个问题：
+//    1) dlsym 在 libSystem.B.dylib 里查 XPC_TYPE_ERROR / XPC_TYPE_DICTIONARY -> 0x0
+//       （实际在 libsystem_xpc.dylib）
+//    2) xpc_get_type 返回的是指针，强转 int 被截断 -> 8 个服务显示同一个值
+//
+//  v3 修法：
+//    · 符号改用 dlsym(RTLD_DEFAULT, ...) 查（覆盖所有已加载库）
+//    · 主判据改成 XPCErrorDescription 键（XPC_ERROR_KEY_DESCRIPTION 的字面值）
+//      - 有值 -> 是 error，打印 desc
+//      - 没值 -> 是非错误回复，打印 key 数
+//    · 顺带记录**响应时间**：Connection invalid 通常立刻返回，真服务有处理延迟
 //
 
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #include <dlfcn.h>
 #include <mach/mach.h>
+#include <mach/mach_time.h>
 #include <unistd.h>
 
 typedef void *xpc_object_t;
@@ -30,16 +38,8 @@ extern void xpc_connection_send_message_with_reply(xpc_connection_t connection,
 extern xpc_object_t xpc_dictionary_create(const void *keys, const void *values, size_t count);
 extern size_t xpc_dictionary_get_count(xpc_object_t xdict);
 
-// 运行时查的符号
-typedef int (*fn_xpc_get_type_t)(xpc_object_t);
-typedef const char *(*fn_xpc_dict_get_string_t)(xpc_object_t, const char *);
-typedef const char *(*fn_xpc_copy_description_t)(xpc_object_t);
-
-static fn_xpc_get_type_t         p_get_type    = NULL;
-static fn_xpc_dict_get_string_t  p_dict_string = NULL;
-static const void               *g_type_error  = NULL;
-static const void               *g_type_dict   = NULL;
-static const char *const        *g_errkey_desc = NULL;
+typedef const char *(*fn_dict_string_t)(xpc_object_t, const char *);
+static fn_dict_string_t p_dict_string = NULL;
 
 static NSMutableString *gLog = nil;
 static UITextView    *gView = nil;
@@ -88,21 +88,23 @@ static svc_t g_svcs[] = {
     { "com.apple.demod",                         "demod" },
 };
 
-// 判断一个 xpc_object 是不是 error / dict，返回描述
-static NSString *classify(xpc_object_t o)
+static double g_tb_numer = 1, g_tb_denom = 1;
+
+// 判据：先看有没有 XPCErrorDescription，再看 key 数
+static NSString *classify(xpc_object_t o, double ms)
 {
-    if (!o) return @"(null object)";
-    int t = p_get_type ? p_get_type(o) : -1;
-    int te = (int)(long)g_type_error;
-    int td = (int)(long)g_type_dict;
-    if (g_type_error && t == te) {
-        const char *d = p_dict_string ? p_dict_string(o, "XPCErrorDescription") : NULL;
-        return [NSString stringWithFormat:@"ERROR: %s", d ? d : "(no desc)"];
+    if (!o) return [NSString stringWithFormat:@"(null) [%.1fms]", ms];
+
+    const char *d = p_dict_string ? p_dict_string(o, "XPCErrorDescription") : NULL;
+    if (d) {
+        // 是 error
+        NSString *ds = [NSString stringWithUTF8String:d];
+        if (!ds) ds = @"(bad utf8)";
+        return [NSString stringWithFormat:@"ERROR [%.1fms]: %@", ms, ds];
     }
-    if (g_type_dict && t == td) {
-        return [NSString stringWithFormat:@"★ DICT(%zu keys)", xpc_dictionary_get_count(o)];
-    }
-    return [NSString stringWithFormat:@"other type=%d", t];
+    // 非 error：当 dict 处理
+    size_t n = xpc_dictionary_get_count(o);
+    return [NSString stringWithFormat:@"★ NON-ERROR [%.1fms] keys=%zu", ms, n];
 }
 
 static void probe(const char *name, const char *tag)
@@ -117,20 +119,23 @@ static void probe(const char *name, const char *tag)
     __block NSString *result = @"(timeout 4s)";
 
     xpc_connection_set_event_handler(c, ^(xpc_object_t event) {
-        result = [NSString stringWithFormat:@"async: %@", classify(event)];
+        result = [NSString stringWithFormat:@"async(no reply yet): %@", classify(event, -1)];
     });
     xpc_connection_resume(c);
 
     xpc_object_t msg = xpc_dictionary_create(NULL, NULL, 0);
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
 
+    uint64_t t0 = mach_absolute_time();
     xpc_connection_send_message_with_reply(c, msg, dispatch_get_global_queue(0, 0), ^(xpc_object_t reply) {
-        result = [NSString stringWithFormat:@"reply: %@", classify(reply)];
+        uint64_t t1 = mach_absolute_time();
+        double ms = (double)(t1 - t0) * g_tb_numer / g_tb_denom / 1000000.0;
+        result = [NSString stringWithFormat:@"reply: %@", classify(reply, ms)];
         dispatch_semaphore_signal(sem);
     });
 
     dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 4ULL * NSEC_PER_SEC));
-    L("  结果: %s", [result UTF8String]);
+    L("  %s", [result UTF8String]);
 
     xpc_connection_cancel(c);
     usleep(200 * 1000);
@@ -138,21 +143,21 @@ static void probe(const char *name, const char *tag)
 
 static void run(void)
 {
-    L("===== XPC 可达性探测（8 个候选）=====");
+    L("===== XPC 可达性探测 v3（8 个候选）=====");
     L("uid=%d pid=%d", getuid(), getpid());
 
-    // 运行时解析 XPC 的数据符号
-    void *h = dlopen("/usr/lib/libSystem.B.dylib", RTLD_LAZY);
-    if (!h) h = dlopen(NULL, RTLD_LAZY);
-    p_get_type    = (fn_xpc_get_type_t)dlsym(h, "xpc_get_type");
-    p_dict_string = (fn_xpc_dict_get_string_t)dlsym(h, "xpc_dictionary_get_string");
-    g_type_error  = dlsym(h, "XPC_TYPE_ERROR");
-    g_type_dict   = dlsym(h, "XPC_TYPE_DICTIONARY");
-    L("[dlsym] get_type=%p dict_string=%p TYPE_ERROR=%p TYPE_DICT=%p",
-      p_get_type, p_dict_string, g_type_error, g_type_dict);
-    if (!p_get_type || !g_type_error) {
-        L("XPC 符号解析失败，退化为只看有没有回复");
+    mach_timebase_info_data_t tb;
+    mach_timebase_info(&tb);
+    g_tb_numer = tb.numer; g_tb_denom = tb.denom;
+
+    // RTLD_DEFAULT 查所有已加载库
+    p_dict_string = (fn_dict_string_t)dlsym(RTLD_DEFAULT, "xpc_dictionary_get_string");
+    if (!p_dict_string) {
+        void *h = dlopen("/usr/lib/libsystem_xpc.dylib", RTLD_LAZY);
+        p_dict_string = (fn_dict_string_t)dlsym(h, "xpc_dictionary_get_string");
     }
+    L("[dlsym] dict_get_string = %p", p_dict_string);
+    if (!p_dict_string) { L("符号解析失败，无法判定"); SetStatus(@"dlsym 失败"); return; }
     L("");
 
     int n = sizeof(g_svcs) / sizeof(g_svcs[0]);
@@ -160,10 +165,10 @@ static void run(void)
 
     L("");
     L("===== 判读 =====");
-    L("  ERROR: Connection invalid     -> 沙箱拒绝");
-    L("  ERROR: Connection interrupted -> 服务在但连接被断");
-    L("  ★ DICT(n keys)                 -> 可达且处理了空消息");
-    L("  超时                          -> 服务在但不应答");
+    L("  ERROR [<1ms]: Connection invalid      -> 沙箱拒绝（立刻返回）");
+    L("  ERROR [>1ms]: Connection interrupted  -> 服务在但连接被断（有处理延迟）");
+    L("  ★ NON-ERROR                            -> 可达且服务处理了空消息");
+    L("  超时 4s                                 -> 服务在但不应答");
     SetStatus(@"完成，看日志");
 }
 
@@ -185,7 +190,7 @@ static void run(void)
     CGFloat h = self.window.bounds.size.height;
     gStatus = [[UILabel alloc] initWithFrame:CGRectMake(8, 52, self.window.bounds.size.width - 16, 30)];
     gStatus.textAlignment = NSTextAlignmentCenter;
-    gStatus.text = @"xpcprobe...";
+    gStatus.text = @"xpcprobe v3...";
     gStatus.textColor = [UIColor colorWithRed:0.3 green:1 blue:0.3 alpha:1];
     gStatus.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightBold];
     [vc.view addSubview:gStatus];
