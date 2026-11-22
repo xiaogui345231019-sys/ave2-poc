@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "vtframe"
-      SRC: "vtframe.m"
-      PLIST: "Info_vtframe.plist"
+      APP_NAME: "vtdecode"
+      SRC: "vtdecode.m"
+      PLIST: "Info_vtdecode.plist"
 
     steps:
       - uses: actions/checkout@v4
