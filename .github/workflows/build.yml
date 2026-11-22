@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "vt112705"
-      SRC: "vt112705.m"
-      PLIST: "Info_vt112705.plist"
+      APP_NAME: "vt112705b"
+      SRC: "vt112705b.m"
+      PLIST: "Info_vt112705b.plist"
 
     steps:
       - uses: actions/checkout@v4
