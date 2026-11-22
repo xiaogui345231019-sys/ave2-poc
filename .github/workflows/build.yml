@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "kextscan"
-      SRC: "kextscan.m"
-      PLIST: "Info_kextscan.plist"
+      APP_NAME: "typecast"
+      SRC: "typecast.m"
+      PLIST: "Info_typecast.plist"
 
     steps:
       - uses: actions/checkout@v4
