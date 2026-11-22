@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "jpegpoc4"
+      APP_NAME: "jpegpoc5"
       SRC: "jpeg_poc4.m"
-      PLIST: "Info_jpeg4.plist"
+      PLIST: "Info_jpeg5.plist"
 
     steps:
       - uses: actions/checkout@v4

