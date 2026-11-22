@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "iorenum"
-      SRC: "iorenum.m"
-      PLIST: "Info_iorenum.plist"
+      APP_NAME: "typecast2"
+      SRC: "typecast2.m"
+      PLIST: "Info_typecast2.plist"
 
     steps:
       - uses: actions/checkout@v4
