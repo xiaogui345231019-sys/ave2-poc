@@ -276,6 +276,35 @@ static void do_new_resource(void)
 {
     L(@"");
     L(@"========== F: sel 9 new_resource（resType=0x82, +0x3c >= planeCount） ==========");
+
+    // ★ EARLY PROBE: resType=0x03 必须是进程内第一次 sel 9 调用。
+    // p16/p17 的差异说明前面的 0x82/0x00 失败调用会污染 vtable+0x5b0 内部状态。
+    {
+        uint32_t caps[] = { 0x80, 0x40, 0x100, 0x200 };
+        for (int i = 0; i < 4 && g_res == 0; i++) {
+            uint8_t in[0x58]; memset(in, 0, sizeof(in));
+            *(uint32_t *)(in + 0x00) = 0x03;
+            *(uint32_t *)(in + 0x38) = caps[i];
+            uint8_t out[0x400]; memset(out, 0, sizeof(out));
+            size_t os = sizeof(out);
+            kern_return_t r = IOConnectCallStructMethod(g_conn, 9, in, sizeof(in), out, &os);
+            L(@"   [EARLY] 0x03 cap=0x%x -> 0x%08x %-12s out=%08x %08x %08x %08x",
+              caps[i], (uint32_t)r, kr_name(r),
+              *(uint32_t *)(out), *(uint32_t *)(out + 4), *(uint32_t *)(out + 8), *(uint32_t *)(out + 12));
+            if (r == KERN_SUCCESS) {
+                uint32_t cands[4] = { *(uint32_t *)(out + 8), *(uint32_t *)out,
+                                      *(uint32_t *)(out + 0x20), *(uint32_t *)(out + 4) };
+                for (int c = 0; c < 4; c++) {
+                    if (cands[c] && cands[c] < 0x100000) {
+                        g_res = cands[c];
+                        L(@"      ★★ group handle = %u", cands[c]);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    if (g_res) return;
     if (!g_surfID) { L(@"   无 surface id，跳过"); return; }
 
     // +0x3c 扫一组候选（planeCount 预期为 1，但多试几档以防 surface 是多平面）
@@ -372,34 +401,36 @@ static void do_new_resource(void)
     }
     // ---- resType=0x03 = 资源组（IOGPUResourceGroup）----
     // 0x9c10804 cmp w8,#3 -> ldr w2,[structIn+0x38] -> newResourceGroup
-    // structIn+0x38 = 初始容量：必须 >= 0x40、2 的幂、上限 0x80000
-    // 这条路不需要 IOSurface、不需要 entitlement
+    // structIn+0x38 = 容量（>=0x40、2 的幂、上限 0x80000）；+0x3c = plane；+0x50 = parent_resource_id
+    // p16 实测：cap=0x40 -> Error，cap=0x80 -> **NoResources**（参数已过检、走到分配），cap=0x100 -> Error
+    // 所以 0x80 是合法容量，缺的是 +0x3c / +0x50 这两个字段。这里固定 cap=0x80 扫它们。
     if (g_res == 0) {
-        L(@"   --- resType=0x03 (资源组)，capacity 扫 0x40/0x80/0x100 ---");
-        uint64_t caps[] = { 0x40, 0x80, 0x100 };
-        for (int i = 0; i < 3 && g_res == 0; i++) {
-            uint8_t in[0x58]; memset(in, 0, sizeof(in));
-            *(uint32_t *)(in + 0x00) = 0x03;               // resType = group
-            *(uint32_t *)(in + 0x38) = (uint32_t)caps[i];  // capacity
-            uint8_t out[0x400]; memset(out, 0, sizeof(out));
-            size_t os = sizeof(out);
-            kern_return_t r = IOConnectCallStructMethod(g_conn, 9, in, sizeof(in), out, &os);
-            L(@"   0x03 cap=0x%llx -> 0x%08x %-12s outSize=0x%zx out=%08x %08x %08x %08x",
-              (unsigned long long)caps[i], (uint32_t)r, kr_name(r), os,
-              *(uint32_t *)(out), *(uint32_t *)(out + 4),
-              *(uint32_t *)(out + 8), *(uint32_t *)(out + 12));
-            if (r == KERN_SUCCESS) {
-                NSMutableString *hx = [NSMutableString string];
-                for (int k = 0; k < 0x30; k += 4)
-                    [hx appendFormat:@"+%02x=%08x ", k, *(uint32_t *)(out + k)];
-                L(@"      out: %@", hx);
-                uint32_t cands[4] = { *(uint32_t *)(out + 8), *(uint32_t *)out,
-                                      *(uint32_t *)(out + 0x20), *(uint32_t *)(out + 4) };
-                for (int c = 0; c < 4; c++) {
-                    if (cands[c] && cands[c] < 0x100000) {
-                        g_res = cands[c];
-                        L(@"      ★ group handle 候选 = %u", cands[c]);
-                        break;
+        L(@"   --- resType=0x03 cap=0x80，扫 +0x3c(plane) x +0x50(parent) ---");
+        uint32_t planes[] = { 0, 1, 2 };
+        uint32_t parents[] = { 0, 1 };
+        for (int pi = 0; pi < 3 && g_res == 0; pi++) {
+            for (int qi = 0; qi < 2 && g_res == 0; qi++) {
+                uint8_t in[0x58]; memset(in, 0, sizeof(in));
+                *(uint32_t *)(in + 0x00) = 0x03;
+                *(uint32_t *)(in + 0x38) = 0x80;        // capacity
+                *(uint32_t *)(in + 0x3c) = planes[pi];  // plane
+                *(uint32_t *)(in + 0x50) = parents[qi]; // parent_resource_id
+                uint8_t out[0x400]; memset(out, 0, sizeof(out));
+                size_t os = sizeof(out);
+                kern_return_t r = IOConnectCallStructMethod(g_conn, 9, in, sizeof(in), out, &os);
+                L(@"   0x03 cap=0x80 p=%u par=%u -> 0x%08x %-12s out=%08x %08x %08x %08x",
+                  planes[pi], parents[qi], (uint32_t)r, kr_name(r),
+                  *(uint32_t *)(out), *(uint32_t *)(out + 4),
+                  *(uint32_t *)(out + 8), *(uint32_t *)(out + 12));
+                if (r == KERN_SUCCESS) {
+                    uint32_t cands[4] = { *(uint32_t *)(out + 8), *(uint32_t *)out,
+                                          *(uint32_t *)(out + 0x20), *(uint32_t *)(out + 4) };
+                    for (int c = 0; c < 4; c++) {
+                        if (cands[c] && cands[c] < 0x100000) {
+                            g_res = cands[c];
+                            L(@"      ★ group handle = %u", cands[c]);
+                            break;
+                        }
                     }
                 }
             }

@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "ave2open2"
-      SRC: "ave2open2.m"
-      PLIST: "Info_ave2open2.plist"
+      APP_NAME: "agxwarm"
+      SRC: "agxwarm.m"
+      PLIST: "Info_agxwarm.plist"
 
     steps:
       - uses: actions/checkout@v4
@@ -38,6 +38,7 @@ jobs:
           test -f "sdk/iPhoneOS${SDK_VER}.sdk/System/Library/Frameworks/IOKit.framework/IOKit.tbd"
           test -f "sdk/iPhoneOS${SDK_VER}.sdk/System/Library/Frameworks/UIKit.framework/UIKit.tbd"
           test -f "sdk/iPhoneOS${SDK_VER}.sdk/System/Library/Frameworks/IOSurface.framework/IOSurface.tbd"
+      test -f "sdk/iPhoneOS${SDK_VER}.sdk/System/Library/Frameworks/Metal.framework/Metal.tbd"
           echo "SDK ok"
 
       - name: Compile (arm64 iOS, ObjC + UIKit + IOKit)
@@ -63,7 +64,7 @@ jobs:
             app.o \
             -framework UIKit \
             -framework Foundation \
-            -framework IOKit \
+            -framework Metal -framework IOKit \
             -framework IOSurface \
             -lobjc \
             -lSystem
