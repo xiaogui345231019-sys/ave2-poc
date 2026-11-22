@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SDK_VER: "16.5"
-      APP_NAME: "ave2gate"
-      SRC: "ave2_gate.m"
-      PLIST: "Info_ave2gate.plist"
+      APP_NAME: "kextscan"
+      SRC: "kextscan.m"
+      PLIST: "Info_kextscan.plist"
 
     steps:
       - uses: actions/checkout@v4
