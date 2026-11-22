@@ -1,31 +1,40 @@
 //
-//  xpcprobe.m — 测 5 个高价值 Mach service 的 app 可达性
+//  xpcprobe.m — 测 8 个高价值 Mach service 的 app 可达性
 //
-//  来源：kernel/userspace 契约审计（子代理 A，报告 userspace-contract-audit.md）
-//    2,017 个 Mach service，1,809 个提供者不查调用方身份；
-//    两端都有证据的 76 个；其中 5 个最值得验：
-//      1. com.apple.Photos.CPLDiagnose.xpc   ← 唯一 _AllowedClients:["always"] + _RoleAccount:root
-//      2. com.apple.commcenter.xpc           ← ent 最高（189），baseband 边界
-//      3. com.apple.server.bluetooth.le.att.xpc ← 纯 raw-XPC / 99 个 xpc 导入
-//      4. SpeechRecognitionCore 的 broker    ← .xpc 套 .xpc 两跳桥
-//      5. com.apple.aps.mobilestoredemoport  ← demod（132 ent / 51 xpc 导入）
-//
-//  本包只做**可达性判定**：建连接 → 发一个空字典 → 等回复/错误 → 记录。
-//  不构造畸形消息、不发数据载荷。零风险。
-//
-//  判读：
-//    · 收到 reply          → 可达，且服务处理了空消息
-//    · XPC_ERROR_CONNECTION_INVALID  → 服务存在但拒绝我们（沙箱/entitlement）
-//    · XPC_ERROR_CONNECTION_INTERRUPTED → 服务存在，连接被中断（可能它要求特定握手）
-//    · 超时                → 服务存在但不应答
-//    · 进程崩溃            → 服务处理空消息就崩（★ 有价值）
+//  theos SDK 里没有 xpc/xpc.h，这里手写所需的最小 API 声明。
+//  只做可达性判定：建连接 → 发空字典 → 等回复/错误 → 记录。
 //
 
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
-#import <xpc/xpc.h>
 #include <mach/mach.h>
 #include <unistd.h>
+
+// ---- XPC 最小声明（手写，因为 SDK 无 xpc/xpc.h）----
+typedef void *xpc_object_t;
+typedef void *xpc_connection_t;
+typedef int   xpc_type_t;
+typedef void (^xpc_handler_t)(xpc_object_t);
+
+extern xpc_connection_t xpc_connection_create_mach_service(const char *name,
+                                                           dispatch_queue_t targetq,
+                                                           uint64_t flags);
+extern void xpc_connection_set_event_handler(xpc_connection_t connection, xpc_handler_t handler);
+extern void xpc_connection_resume(xpc_connection_t connection);
+extern void xpc_connection_cancel(xpc_connection_t connection);
+extern void xpc_connection_send_message_with_reply(xpc_connection_t connection,
+                                                    xpc_object_t message,
+                                                    dispatch_queue_t replyq,
+                                                    xpc_handler_t handler);
+extern xpc_object_t xpc_dictionary_create(const void *keys, const void *values, size_t count);
+extern size_t xpc_dictionary_get_count(xpc_object_t xdict);
+extern const char *xpc_dictionary_get_string(xpc_object_t xdict, const char *key);
+extern xpc_type_t xpc_get_type(xpc_object_t object);
+
+// XPC_TYPE_* 是全局变量
+extern const struct _xpc_type_s *XPC_TYPE_ERROR;
+extern const struct _xpc_type_s *XPC_TYPE_DICTIONARY;
+extern const char *const XPC_ERROR_KEY_DESCRIPTION;
 
 static NSMutableString *gLog = nil;
 static UITextView    *gView = nil;
@@ -61,35 +70,20 @@ static void SetStatus(NSString *s)
     });
 }
 
-// 错误对象转字符串
-static NSString *desc(xpc_object_t o)
-{
-    if (!o) return @"(null)";
-    if (xpc_get_type(o) == XPC_TYPE_ERROR) {
-        const char *d = xpc_dictionary_get_string(o, XPC_ERROR_KEY_DESCRIPTION);
-        return [NSString stringWithFormat:@"ERROR: %s",
-                xpc_get_type(o) == XPC_TYPE_ERROR ? (d ? d : "?") : "?"];
-    }
-    if (xpc_get_type(o) == XPC_TYPE_DICTIONARY) {
-        return [NSString stringWithFormat:@"DICT(%zu keys)", xpc_dictionary_get_count(o)];
-    }
-    return [NSString stringWithFormat:@"type=%d", (int)xpc_get_type(o)];
-}
-
 typedef struct {
     const char *name;
     const char *tag;
 } svc_t;
 
 static svc_t g_svcs[] = {
-    { "com.apple.Photos.CPLDiagnose.xpc",           "CPLDiagnose(always+root)" },
-    { "com.apple.commcenter.xpc",                   "CommCenter(189ent)" },
-    { "com.apple.server.bluetooth.le.att.xpc",      "bluetoothd-LE-ATT" },
-    { "com.apple.server.bluetooth.le.att",          "bluetoothd(无.xpc后缀)" },
-    { "com.apple.speech.broker",                    "SpeechBroker" },
-    { "com.apple.SpeechRecognitionCore.brokerd",    "SpeechRecBroker" },
-    { "com.apple.aps.mobilestoredemoport",          "demod-port" },
-    { "com.apple.demod",                            "demod(无后缀)" },
+    { "com.apple.Photos.CPLDiagnose.xpc",        "CPLDiagnose(always+root)" },
+    { "com.apple.commcenter.xpc",                "CommCenter(189ent)" },
+    { "com.apple.server.bluetooth.le.att.xpc",   "bt-LE-ATT(.xpc)" },
+    { "com.apple.server.bluetooth.le.att",       "bt-LE-ATT(noext)" },
+    { "com.apple.speech.broker",                 "SpeechBroker" },
+    { "com.apple.SpeechRecognitionCore.brokerd", "SpeechRecBroker" },
+    { "com.apple.aps.mobilestoredemoport",       "demod-port" },
+    { "com.apple.demod",                         "demod" },
 };
 
 static void probe(const char *name, const char *tag)
@@ -100,41 +94,38 @@ static void probe(const char *name, const char *tag)
 
     xpc_connection_t c = xpc_connection_create_mach_service(name, NULL, 0);
     if (!c) {
-        L("  create -> NULL（服务名可能不存在）");
+        L("  create -> NULL（服务名不存在？）");
         return;
     }
 
-    __block BOOL done = NO;
-    __block NSString *result = @"(timeout)";
+    __block NSString *result = @"(timeout 4s)";
+    __block BOOL gotReply = NO;
 
     xpc_connection_set_event_handler(c, ^(xpc_object_t event) {
-        if (xpc_get_type(event) == XPC_TYPE_ERROR) {
+        if (xpc_get_type(event) == (xpc_type_t)XPC_TYPE_ERROR) {
             const char *d = xpc_dictionary_get_string(event, XPC_ERROR_KEY_DESCRIPTION);
-            result = [NSString stringWithFormat:@"EVENT_ERROR: %s", d ? d : "?"];
-            done = YES;
+            result = [NSString stringWithFormat:@"EVENT_ERROR: %s", d ? d : "(no desc)"];
         }
     });
-
     xpc_connection_resume(c);
 
-    // 发一个空字典，等回复
     xpc_object_t msg = xpc_dictionary_create(NULL, NULL, 0);
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
 
     xpc_connection_send_message_with_reply(c, msg, dispatch_get_global_queue(0, 0), ^(xpc_object_t reply) {
-        if (xpc_get_type(reply) == XPC_TYPE_ERROR) {
+        if (xpc_get_type(reply) == (xpc_type_t)XPC_TYPE_ERROR) {
             const char *d = xpc_dictionary_get_string(reply, XPC_ERROR_KEY_DESCRIPTION);
-            result = [NSString stringWithFormat:@"REPLY_ERROR: %s", d ? d : "?"];
+            result = [NSString stringWithFormat:@"REPLY_ERROR: %s", d ? d : "(no desc)"];
+        } else if (xpc_get_type(reply) == (xpc_type_t)XPC_TYPE_DICTIONARY) {
+            result = [NSString stringWithFormat:@"★ DICT(%zu keys)", xpc_dictionary_get_count(reply)];
         } else {
-            result = desc(reply);
+            result = [NSString stringWithFormat:@"reply type=%d", xpc_get_type(reply)];
         }
-        done = YES;
+        gotReply = YES;
         dispatch_semaphore_signal(sem);
     });
 
-    // 最多等 4 秒
     dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 4ULL * NSEC_PER_SEC));
-
     L("  结果: %s", [result UTF8String]);
 
     xpc_connection_cancel(c);
@@ -155,10 +146,10 @@ static void run(void)
 
     L("");
     L("===== 判读 =====");
-    L("  · REPLY_ERROR: Connection invalid  → 沙箱拒绝（不在 profile 白名单）");
-    L("  · REPLY_ERROR: Connection interrupted → 服务在，但连接被断（可能要特定握手）");
-    L("  · 返回 DICT   → ★ 可达且服务处理了空消息");
-    L("  · 超时        → 服务在但不应答");
+    L("  REPLY_ERROR: Connection invalid     -> 沙箱拒绝");
+    L("  REPLY_ERROR: Connection interrupted -> 服务在但连接被断");
+    L("  ★ DICT(n keys)                      -> 可达且处理了空消息");
+    L("  超时                                 -> 服务在但不应答");
     SetStatus(@"完成，看日志");
 }
 
